@@ -16,7 +16,8 @@ import cv2
 import numpy as np
 from augmentation import combinedAugmentation
 from feature_extraction import extract_features
-from train import load_features, scale_features, train_svm_grid, train_knn_grid, evaluate_model
+from train import load_features, scale_features, train_svm_grid, train_knn_grid 
+from evaluate import evaluate_model
 import joblib
 import json
 
@@ -224,7 +225,7 @@ def main():
         print(f"  Test: {len(X_test)} samples")
         
         # Scale features
-        scaler, X_train_scaled, X_val_scaled, X_test_scaled = scale_features(X_train, X_val, X_test)
+        scaler, X_train_scaled, X_val_scaled, X_test_scaled = scale_features(X_train, X_val, X_test) #ignore
         
         # Save scaler
         scaler_path = Path(args.model_dir) / 'scaler.pkl'
@@ -252,7 +253,7 @@ def main():
             print("\n" + "-"*60)
             print("Training KNN model...")
             print("-"*60)
-            knn_model = train_knn_grid(X_train_scaled, y_train, cv=3, n_jobs=-1, verbose=1)
+            knn_model = train_knn_grid(X_train_scaled, y_train, cv=3 )
             
             # Evaluate
             print("\nKNN Model Evaluation:")
