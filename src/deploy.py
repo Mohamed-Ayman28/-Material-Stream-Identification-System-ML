@@ -6,7 +6,6 @@ import time
 import json
 import os
 from pathlib import Path
-
 import cv2
 import joblib
 import numpy as np
