@@ -30,10 +30,8 @@ def scale_features(X_train, X_val, X_test=None):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
-    if X_test is not None:
-        X_test_scaled = scaler.transform(X_test)
-        return scaler, X_train_scaled, X_val_scaled, X_test_scaled
-    return scaler, X_train_scaled, X_val_scaled
+    X_test_scaled = scaler.transform(X_test) if X_test is not None else None
+    return scaler, X_train_scaled, X_val_scaled, X_test_scaled
 
 
 def train_svm_grid(X_train, y_train, cv=3, n_jobs=-1, verbose=1):
@@ -86,9 +84,9 @@ def train_knn_grid(X_train, y_train, cv=3):
 def evaluate_and_report(model, X, y, class_map=None):
     preds = model.predict(X)
     acc = float(accuracy_score(y, preds))
-    report = classification_report(y, preds, output_dict=True, zero_division=0)
+    report = classification_report(y, preds, output_dict=True, zero_division="0")
     cm = confusion_matrix(y, preds)
-    return acc, report, cm
+    return acc, report, cm 
 
 
 def main(args):

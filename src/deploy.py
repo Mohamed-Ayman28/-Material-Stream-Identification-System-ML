@@ -2,6 +2,7 @@
 ##Real-time webcam deployment for the Material Stream Identification (MSI) System.
 
 import argparse
+from multiprocessing import Value
 import time
 import json
 import os
@@ -139,6 +140,7 @@ def run_camera(model_path, scaler_path=None, class_map_path=None,
             resized = cv2.resize(rgb, frame_size)
 
             feat = extract_features(resized)
+            if feat is None: raise ValueError('extract_features returned None')
             feat = feat.reshape(1, -1)
             if scaler is not None:
                 feat = scaler.transform(feat)
