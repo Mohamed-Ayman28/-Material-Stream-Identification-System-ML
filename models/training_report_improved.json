@@ -1,0 +1,22 @@
+{
+  "pca_components": 500,
+  "explained_variance": 0.5823541332888461,
+  "class_map": {
+    "0": "glass",
+    "1": "paper",
+    "2": "cardboard",
+    "3": "plastic",
+    "4": "metal",
+    "5": "trash"
+  },
+  "results": {
+    "svm": {
+      "val_accuracy": 0.39272943980929675,
+      "test_accuracy": 0.3490172721858249,
+      "best_params": {
+        "C": 1,
+        "gamma": "scale"
+      }
+    }
+  }
+}
