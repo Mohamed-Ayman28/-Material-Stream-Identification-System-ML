@@ -33,6 +33,7 @@ def extract_hog(img, pixels_per_cell=(8, 8), cells_per_block=(2, 2), orientation
 def extract_color_hist(img, bins=(8, 8, 8)):
  chans = cv2.split(img)
  hist = []
+ h = None
  for ch in chans:
   h = np.histogram(ch, bins=bins[0], range=(0, 256))[0]
  hist.append(h)
