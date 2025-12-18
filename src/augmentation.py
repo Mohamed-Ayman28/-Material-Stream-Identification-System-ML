@@ -51,9 +51,15 @@ def changeBrightness(image, factor):
     return brightened_image
 
 
+def addNoise(img):
+    """Add Gaussian noise to image"""
+    noise = np.random.normal(0, 8, img.shape).astype(np.uint8)
+    return cv2.add(img, noise)
+
+
 def random_noise(img):
- noise = np.random.normal(0, 8, img.shape).astype(np.uint8)
- return cv2.add(img, noise)
+    """Alias for addNoise"""
+    return addNoise(img)
 
 
 

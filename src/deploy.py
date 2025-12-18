@@ -1,5 +1,6 @@
 #deploy.py
 ##Real-time webcam deployment for the Material Stream Identification (MSI) System.
+##Optimized for KNN and SVM models with high accuracy detection
 
 import argparse
 import time
@@ -9,9 +10,20 @@ from pathlib import Path
 import cv2
 import joblib
 import numpy as np
-from feature_extraction import extract_features
+
+# Try enhanced features first, fall back to original
+try:
+    from feature_extraction_enhanced import extract_features
+    USING_ENHANCED = True
+except ImportError:
+    from feature_extraction import extract_features
+    USING_ENHANCED = False
+
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import VotingClassifier
+
+from utils import predict_with_rejection
 
 def load_class_map(path):
     if path is None:
@@ -89,8 +101,20 @@ def knn_predict_with_reject(model, X_feat, dist_threshold=0.5):
 
 
 def run_camera(model_path, scaler_path=None, class_map_path=None,
-               svm_threshold=0.6, knn_dist_threshold=0.5, cam_index=0,
+               confidence_threshold=0.65, cam_index=0,
                frame_size=(128, 128), show_fps=True):
+    """
+    Run real-time webcam detection with KNN+SVM ensemble
+    
+    Args:
+        model_path: Path to model file (pkl)
+        scaler_path: Path to scaler file (pkl)
+        class_map_path: Path to class map JSON
+        confidence_threshold: Minimum confidence to display prediction (0-1)
+        cam_index: Camera device index
+        frame_size: Size to resize frames for feature extraction
+        show_fps: Whether to display FPS
+    """
 
     model_path = Path(model_path)
     if not model_path.exists():
@@ -107,24 +131,30 @@ def run_camera(model_path, scaler_path=None, class_map_path=None,
         print('Loaded class_map with', len(class_map), 'entries')
 
     # determine model type
-    is_svm = False
-    is_knn = False
-    
-    if isinstance(model, SVC):
-        is_svm = True
-    if isinstance(model, KNeighborsClassifier):
-        is_knn = True
+    is_svm = isinstance(model, SVC)
+    is_knn = isinstance(model, KNeighborsClassifier)
+    is_ensemble = isinstance(model, VotingClassifier)
 
-    print('Model type:', 'SVM' if is_svm else ('k-NN' if is_knn else type(model)))
+    model_type = 'Ensemble' if is_ensemble else ('SVM' if is_svm else ('KNN' if is_knn else 'Unknown'))
+    print(f'Model type: {model_type}')
 
     cap = cv2.VideoCapture(cam_index)
     if not cap.isOpened():
         raise RuntimeError('Cannot open camera index ' + str(cam_index))
 
+    # Set camera properties for better performance
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+
     last_time = time.time()
     fps = 0.0
+    
+    # For smoothing predictions
+    prediction_history = []
+    max_history = 5
 
-    window_name = 'MSI - Live (press q to quit)'
+    window_name = 'Material Detection - Press Q to quit, S to screenshot'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     try:
@@ -134,9 +164,11 @@ def run_camera(model_path, scaler_path=None, class_map_path=None,
                 print('Frame read failed; exiting')
                 break
 
+            # Preprocess frame
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             resized = cv2.resize(rgb, frame_size)
 
+            # Extract features
             feat = extract_features(resized)
             feat = feat.reshape(1, -1)
             if scaler is not None:
@@ -144,55 +176,74 @@ def run_camera(model_path, scaler_path=None, class_map_path=None,
 
             label_idx = None
             conf_val = 0.0
-            extra = ''
+            status_text = ''
 
-            if is_svm:
-                label_idx, conf_val = svm_predict_with_reject(model, feat, threshold=svm_threshold)
+            try:
+                # Model-specific rejection first
+                rej = predict_with_rejection(model, feat)
+                label_idx = rej.label_idx
+                conf_val = float(rej.confidence) if rej.confidence is not None else 0.0
+
                 if label_idx is None:
-                    extra = f' (rejected, prob={conf_val:.3f})'
-                else:
-                    extra = f' (prob={conf_val:.3f})'
-            elif is_knn:
-                pred, conf_val, mean_dist = knn_predict_with_reject(model, feat, dist_threshold=knn_dist_threshold)
-                label_idx = pred
-                if label_idx is None:
-                    extra = f' (rejected, mean_dist={mean_dist:.3f})'
-                else:
-                    extra = f' (inv-dist-conf={conf_val:.3f})'
-            else:
-                # Generic model: try predict + probability
-                try:
-                    probs = model.predict_proba(feat)
-                    p = float(np.max(probs))
-                    pred = int(np.argmax(probs))
-                    if p >= svm_threshold:
-                        label_idx = pred
-                        conf_val = p
-                        extra = f' (prob={p:.3f})'
+                    # rejected by tailored mechanism
+                    if rej.confidence is not None:
+                        status_text = f'Unknown ({rej.reason}: {rej.confidence:.2%})'
                     else:
+                        status_text = f'Unknown ({rej.reason})'
+                else:
+                    # Apply the existing deployment threshold as an additional safety gate
+                    if rej.confidence is not None and rej.confidence < confidence_threshold:
                         label_idx = None
-                        conf_val = p
-                        extra = f' (rejected, prob={p:.3f})'
-                except Exception:
-                    pred = int(model.predict(feat)[0])
-                    label_idx = pred
-                    conf_val = 1.0
-                    extra = ''
+                        status_text = f'Low confidence: {rej.confidence:.2%}'
+                    else:
+                        status_text = f'Confidence: {rej.confidence:.2%}' if rej.confidence is not None else 'Confidence: N/A'
 
-            label_text = pretty_label(label_idx, class_map)
+                        # Add to history for smoothing
+                        prediction_history.append(int(label_idx))
+                        if len(prediction_history) > max_history:
+                            prediction_history.pop(0)
 
-            # draw text on frame
-            text = f'Pred: {label_text}{extra}'
-            cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                        # Use most common prediction from history
+                        if len(prediction_history) >= 3:
+                            label_idx = max(set(prediction_history), key=prediction_history.count)
+                    
+            except Exception as e:
+                print(f'Prediction error: {e}')
+                label_idx = None
+                status_text = 'Error'
 
-            # draw FPS
+            # Prepare display text
+            if label_idx is not None:
+                label_text = pretty_label(label_idx, class_map)
+                color = (0, 255, 0)  # Green for confident prediction
+            else:
+                label_text = 'Unknown'
+                color = (0, 0, 255)  # Red for uncertain
+                if not prediction_history:
+                    prediction_history = []
+
+            # Draw prediction box
+            h, w = frame.shape[:2]
+            cv2.rectangle(frame, (10, 10), (w-10, 120), (0, 0, 0), -1)
+            cv2.rectangle(frame, (10, 10), (w-10, 120), color, 2)
+            
+            # Draw text
+            cv2.putText(frame, f'Material: {label_text}', (20, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+            cv2.putText(frame, status_text, (20, 85), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.putText(frame, f'Model: {model_type}', (20, 110), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            # Draw FPS
             if show_fps:
                 now = time.time()
                 dt = now - last_time
                 if dt > 0:
                     fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps != 0 else (1.0 / dt)
                 last_time = now
-                cv2.putText(frame, f'FPS: {fps:.1f}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                cv2.putText(frame, f'FPS: {fps:.1f}', (w-150, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
             cv2.imshow(window_name, frame)
 
@@ -212,18 +263,18 @@ def run_camera(model_path, scaler_path=None, class_map_path=None,
 
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser()
-    p.add_argument('--model', required=True, help='Path to best model (best_model.pkl or svm_model.pkl / knn_model.pkl)')
-    p.add_argument('--scaler', required=False, help='Path to scaler.pkl (StandardScaler). Optional but recommended')
-    p.add_argument('--class_map', required=False, help='Path to class_map JSON or training_report.json containing class_map')
-    p.add_argument('--svm_threshold', type=float, default=0.6, help='Probability threshold for SVM to accept a prediction')
-    p.add_argument('--knn_dist_threshold', type=float, default=0.5, help='Distance threshold for k-NN to accept a prediction (lower = stricter)')
-    p.add_argument('--cam', type=int, default=0, help='Camera index for cv2.VideoCapture')
-    p.add_argument('--width', type=int, default=128, help='Width to resize frames for feature extraction')
-    p.add_argument('--height', type=int, default=128, help='Height to resize frames for feature extraction')
-    p.add_argument('--no-fps', dest='show_fps', action='store_false', help='Disable FPS overlay')
+    p = argparse.ArgumentParser(description='Real-time material detection with KNN+SVM')
+    p.add_argument('--model', required=True, help='Path to model file (ensemble_knn_svm.pkl, svm_model.pkl, or knn_model.pkl)')
+    p.add_argument('--scaler', required=False, help='Path to scaler.pkl (StandardScaler)')
+    p.add_argument('--class-map', required=False, help='Path to class_map.json or training_report.json')
+    p.add_argument('--confidence', type=float, default=0.65, help='Minimum confidence threshold (0-1)')
+    p.add_argument('--cam', type=int, default=0, help='Camera index')
+    p.add_argument('--width', type=int, default=128, help='Frame width for feature extraction')
+    p.add_argument('--height', type=int, default=128, help='Frame height for feature extraction')
+    p.add_argument('--no-fps', dest='show_fps', action='store_false', help='Disable FPS display')
     args = p.parse_args()
 
     run_camera(args.model, scaler_path=args.scaler, class_map_path=args.class_map,
-               svm_threshold=args.svm_threshold, knn_dist_threshold=args.knn_dist_threshold,
-               cam_index=args.cam, frame_size=(args.width, args.height), show_fps=args.show_fps)
+               confidence_threshold=args.confidence,
+               cam_index=args.cam, frame_size=(args.width, args.height),
+               show_fps=args.show_fps)

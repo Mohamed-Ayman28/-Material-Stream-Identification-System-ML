@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from feature_extraction import extract_features
+from utils import predict_with_rejection
 
 
 def load_class_map(path):
@@ -46,21 +47,14 @@ def predict_image(image_path, model, scaler, pca, class_map=None, img_size=(128,
     features_scaled = scaler.transform(features)
     features_pca = pca.transform(features_scaled)
     
-    # Predict
-    pred_idx = int(model.predict(features_pca)[0])
-    
-    # Get probability
-    confidence = None
-    try:
-        probs = model.predict_proba(features_pca)
-        confidence = float(np.max(probs))
-    except:
-        confidence = None
-    
-    # Get class name
+    result = predict_with_rejection(model, features_pca)
+
+    if result.label_idx is None:
+        return None, 'Unknown', result.confidence
+
+    pred_idx = int(result.label_idx)
     class_name = class_map.get(pred_idx, str(pred_idx)) if class_map else str(pred_idx)
-    
-    return pred_idx, class_name, confidence
+    return pred_idx, class_name, result.confidence
 
 
 def main():
@@ -101,7 +95,7 @@ def main():
     print("PREDICTION RESULTS")
     print("="*60)
     print(f"Predicted Class: {class_name}")
-    print(f"Class Index: {pred_idx}")
+    print(f"Class Index: {pred_idx if pred_idx is not None else 'N/A'}")
     if confidence is not None:
         print(f"Confidence: {confidence:.4f} ({confidence*100:.2f}%)")
     print("="*60)
