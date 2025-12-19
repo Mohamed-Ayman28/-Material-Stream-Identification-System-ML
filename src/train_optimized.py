@@ -117,7 +117,7 @@ def create_ensemble(svm, knn, rf, gb):
             ('gb', gb)
         ],
         voting='soft',
-        weights=[2, 1, 2, 2]  # Give more weight to SVM and tree-based models
+        weights=[2, 1, 2, 2]  
     )
     
     return ensemble

@@ -62,14 +62,14 @@ def predict_with_rejection(
 	*,
 	model_kind: Optional[str] = None,
 	# Tailored thresholds per model family
-	svm_min_prob: float = 0.65,
-	svm_min_prob_gap: float = 0.18,
-	svm_min_margin_sigmoid: float = 0.60,
-	knn_max_mean_distance: float = 0.50,
-	ensemble_min_prob: float = 0.60,
-	ensemble_min_prob_gap: float = 0.15,
-	generic_min_prob: float = 0.60,
-	generic_min_prob_gap: float = 0.15,
+	svm_min_prob: float = 0.45,
+	svm_min_prob_gap: float = 0.12,
+	svm_min_margin_sigmoid: float = 0.50,
+	knn_max_mean_distance: float = 50.0,
+	ensemble_min_prob: float = 0.30,
+	ensemble_min_prob_gap: float = 0.03,
+	generic_min_prob: float = 0.50,
+	generic_min_prob_gap: float = 0.12,
 ) -> RejectResult:
 	"""Predict and reject low-confidence results.
 

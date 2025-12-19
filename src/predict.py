@@ -9,9 +9,8 @@ import numpy as np
 from pathlib import Path
 import cv2
 import joblib
-# Rejection mechanism (model-specific)
 from utils import predict_with_rejection
-# Use enhanced features (87-feature version) for *_enhanced models
+
 try:
     from feature_extraction_enhanced import extract_features
     USING_ENHANCED = True
@@ -78,12 +77,13 @@ def predict_image(image_path, model, scaler=None, class_map=None, img_size=(128,
             all_probas['Unknown'] = float(result.confidence)
 
     confidence = result.confidence
+    extra_info = result.extra  
 
     if result.label_idx is None:
-        return 'Unknown', confidence, all_probas
+        return 'Unknown', confidence, all_probas, extra_info
 
     class_name = class_map.get(int(result.label_idx), str(result.label_idx)) if class_map else str(result.label_idx)
-    return class_name, confidence, all_probas
+    return class_name, confidence, all_probas, extra_info
 
 
 def main():
@@ -101,6 +101,25 @@ def main():
     print(f'Loading model from {args.model}...')
     model = joblib.load(args.model)
     
+    # Detect model type and accuracy
+    model_info = {
+        'name': 'Unknown Model',
+        'accuracy': None
+    }
+    
+    if 'knn' in args.model.lower():
+        model_info['name'] = 'K-Nearest Neighbors (KNN)'
+        model_info['accuracy'] = 90.83
+    elif 'svm' in args.model.lower():
+        model_info['name'] = 'Support Vector Machine (SVM)'
+        model_info['accuracy'] = 96.67
+    elif 'ensemble' in args.model.lower():
+        model_info['name'] = 'Ensemble (Voting Classifier)'
+        model_info['accuracy'] = 98.33
+    elif 'rf' in args.model.lower():
+        model_info['name'] = 'Random Forest'
+        model_info['accuracy'] = 95.0
+    
     # Load scaler
     scaler = None
     if args.scaler:
@@ -115,24 +134,28 @@ def main():
     
     # Predict
     print(f'\nPredicting material for: {args.image}')
-    class_name, confidence, all_probas = predict_image(
+    class_name, confidence, all_probas, extra_info = predict_image(
         args.image, model, scaler, class_map, 
         img_size=(args.width, args.height)
     )
     
     # Display results
     print(f'\n{"="*50}')
+    print(f'Model: {model_info["name"]}')
+    if model_info['accuracy']:
+        print(f'Model Accuracy : {model_info["accuracy"]:.2f}%')
+    print(f'{"="*50}')
     print(f'Predicted Material: {class_name}')
     if confidence is not None:
         print(f'Confidence: {confidence:.2%}')
+    
+    # Show KNN distance if available
+    if extra_info and 'mean_distance' in extra_info:
+        print(f'KNN Mean Distance: {extra_info["mean_distance"]:.2f}')
+    
     if class_name == 'Unknown':
         print('⚠️  Item not recognized or too uncertain to classify')
     print(f'{"="*50}')
-    
-    if all_probas:
-        print('\nAll class probabilities:')
-        for class_name, prob in sorted(all_probas.items(), key=lambda x: x[1], reverse=True):
-            print(f'  {class_name:12s}: {prob:.2%}')
 
 
 if __name__ == '__main__':
